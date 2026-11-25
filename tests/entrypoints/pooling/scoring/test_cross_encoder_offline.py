@@ -8,9 +8,12 @@ import pytest
 import torch
 
 from tests.models.utils import softmax
+from tests.utils import VLLM_PATH
 from vllm import LLM, PoolingParams
+from vllm.exceptions import VLLMValidationError
 
 MODEL_NAME = "vllm-project/Qwen3-Reranker-0.6B-seq-cls"
+TEMPLATE = VLLM_PATH / "examples/pooling/score/template/qwen3_reranker.jinja"
 PROMPT = "The chef prepared a delicious meal."
 TEXTS_1 = [
     "What is the capital of France?",
@@ -185,6 +188,31 @@ def test_max_tokens_per_doc(llm: LLM):
     no_limit_tokens = len(outputs_no_limit[0].prompt_token_ids)
     with_limit_tokens = len(outputs_with_limit[0].prompt_token_ids)
     assert with_limit_tokens < no_limit_tokens
+
+
+@pytest.mark.skip_global_cleanup
+def test_truncation_is_rejected_when_it_cuts_the_chat_template(llm: LLM):
+    template = TEMPLATE.read_text()
+    with pytest.raises(VLLMValidationError, match="max_tokens_per_doc") as exc_info:
+        llm.score(
+            TEXTS_1[0],
+            "The capital of France is Paris. " * 20,
+            chat_template=template,
+            tokenization_kwargs={"truncate_prompt_tokens": 64},
+            use_tqdm=False,
+        )
+    assert exc_info.value.parameter == "truncate_prompt_tokens"
+
+    # A limit the prompt already fits in changes nothing.
+    (full,) = llm.score(TEXTS_1[0], TEXTS_2[0], chat_template=template, use_tqdm=False)
+    (limited,) = llm.score(
+        TEXTS_1[0],
+        TEXTS_2[0],
+        chat_template=template,
+        tokenization_kwargs={"truncate_prompt_tokens": 512},
+        use_tqdm=False,
+    )
+    assert limited.prompt_token_ids == full.prompt_token_ids
 
 
 def test_pooling_params(llm: LLM):

@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 import time
 from collections.abc import Sequence
+from dataclasses import replace
 from functools import cached_property
 from typing import Any, TypeAlias, cast
 
@@ -676,10 +677,23 @@ class CrossEncoderIOProcessor(ScoringIOProcessor):
         if self.num_post_process_tokens:
             tok_params = reserve_tokens(tok_params, self.num_post_process_tokens)
 
+        # A chat template ends the prompt with the turns the score is read
+        # from, so truncating the composed prompt would score a token inside
+        # the document. Tokenize in full and reject if truncation would apply.
+        check_truncation = tok_params.truncate_prompt_tokens is not None and (
+            render_params["chat_template"] is not None
+            or self.saved_chat_template is not None
+        )
+        encode_params = (
+            replace(tok_params, truncate_prompt_tokens=None)
+            if check_truncation
+            else tok_params
+        )
+
         _, engine_prompt = self.get_score_prompt(
             data_1=render_params["data_1"],
             data_2=render_params["data_2"],
-            encode_kwargs=tok_params.get_encode_kwargs(),
+            encode_kwargs=encode_params.get_encode_kwargs(),
             chat_template=render_params["chat_template"],
             chat_template_content_format=render_params["chat_template_content_format"],
             max_tokens_per_query=render_params["max_tokens_per_query"],
@@ -688,6 +702,18 @@ class CrossEncoderIOProcessor(ScoringIOProcessor):
             if prompt_extras
             else None,
         )
+
+        if check_truncation:
+            limit = tok_params.truncate_prompt_tokens
+            if limit is not None and limit < 0:
+                limit = tok_params.max_truncation_tokens
+            if limit is not None and len(engine_prompt["prompt_token_ids"]) > limit:
+                raise VLLMValidationError(
+                    "truncate_prompt_tokens would cut the end of the chat template "
+                    "used for scoring. Use max_tokens_per_query and "
+                    "max_tokens_per_doc to truncate the query and documents.",
+                    parameter="truncate_prompt_tokens",
+                )
 
         tok_params.apply_post_tokenization(self.tokenizer, engine_prompt)
 
