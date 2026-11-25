@@ -65,6 +65,8 @@ The three supported scoring functions are as illustrated in the figure below.
 
     Examples : [examples/pooling/score/using_template_offline.py](../../../examples/pooling/score/using_template_offline.py) [examples/pooling/score/using_template_online.py](../../../examples/pooling/score/using_template_online.py)
 
+    With a template, the score is read at the end of the prompt, so vLLM rejects a `truncate_prompt_tokens` that would shorten it. Use `max_tokens_per_query` and `max_tokens_per_doc` to truncate long inputs.
+
 !!! note
     Load the official original `BAAI/bge-reranker-v2-gemma` by using the following command.
 
